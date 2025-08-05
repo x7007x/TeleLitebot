@@ -1,8 +1,21 @@
 import asyncio
 from TeleLite import Bot, filters
+from flask import Flask, request
+
 
 bot = Bot("8083493226:AAGCSHnkc3dQUS5iuQlnAiaqOvjpyVnZZtQ")
 app = bot.app
+
+@app.route('/')
+def handle_alive():
+    return 'Alive 🕯️', 200
+
+@app.route('/webhook', methods=['POST'])
+def handle_update():
+    update = request.get_json()
+    update_type = bot.extract_main_key(update)
+    bot.process_new_updates(update_type, update[update_type])
+    return '🚀', 200
 
 @bot.on_message(filters.text("hello"))
 async def greet_user(message):
