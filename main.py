@@ -92,4 +92,5 @@ async def rating_response(callback):
               message_id=callback["message"]["message_id"], 
               text=f"Your rating: {rating}⭐")
 
-bot.run(webhook=True)
+#bot.run(webhook=True) and 
+app.run(host='0.0.0.0', port=5000)
