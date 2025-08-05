@@ -2,6 +2,7 @@ import asyncio
 from TeleLite import Bot, filters
 
 bot = Bot("8083493226:AAGCSHnkc3dQUS5iuQlnAiaqOvjpyVnZZtQ")
+app = bot.app
 
 @bot.on_message(filters.text("hello"))
 async def greet_user(message):
