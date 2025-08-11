@@ -6,11 +6,11 @@ app = bot.app
 
 @bot.on_message(filters.text("hello"))
 async def greet_user(message):
-    await bot("sendMessage", chat_id=message["chat"]["id"], text="Welcome!")
+    await bot.call("sendMessage", chat_id=message["chat"]["id"], text="Welcome!")
 
 @bot.on_message(filters.text("ping") | filters.text("pong"))
 async def pong_ping(message):
-    await bot("sendMessage", chat_id=message["chat"]["id"], text="pong!")
+    await bot.call("sendMessage", chat_id=message["chat"]["id"], text="pong!")
 
 @bot.on_message(~filters.text("ignore me"))
 async def all_but_ignore(message):
@@ -26,23 +26,23 @@ async def welcome(message):
         "resize_keyboard": True,
         "one_time_keyboard": True
     }
-    await bot("sendMessage", chat_id=message["chat"]["id"], text="Welcome! Use the keyboard below:", reply_markup=keyboard)
+    await bot.call("sendMessage", chat_id=message["chat"]["id"], text="Welcome! Use the keyboard below:", reply_markup=keyboard)
 
 @bot.on_message(filters.regex(r"^\d+$"))
 async def number_message(message):
-    await bot("sendMessage", chat_id=message["chat"]["id"], text="You sent a number!")
+    await bot.call("sendMessage", chat_id=message["chat"]["id"], text="You sent a number!")
 
 @bot.on_message(filters.has_photo() | filters.has_video())
 async def media_received(message):
-    await bot("sendMessage", chat_id=message["chat"]["id"], text="Nice media!")
+    await bot.call("sendMessage", chat_id=message["chat"]["id"], text="Nice media!")
 
 @bot.on_callback_query()
 async def handle_callback(callback):
     data = callback.get("data")
     if data == "like":
-        await bot("answerCallbackQuery", callback_query_id=callback["id"], text="You liked 👍")
+        await bot.call("answerCallbackQuery", callback_query_id=callback["id"], text="You liked 👍")
     elif data == "dislike":
-        await bot("answerCallbackQuery", callback_query_id=callback["id"], text="You disliked 👎")
+        await bot.call("answerCallbackQuery", callback_query_id=callback["id"], text="You disliked 👎")
 
 @bot.on_message(filters.edited())
 async def edited_message(message):
@@ -60,11 +60,11 @@ async def payment_request(message):
         "currency": "USD",
         "prices": [{"label": "Product", "amount": 1000}]
     }
-    await bot("sendInvoice", **invoice)
+    await bot.call("sendInvoice", **invoice)
 
 @bot.on_pre_checkout_query()
 async def checkout_handler(query):
-    await bot("answerPreCheckoutQuery", pre_checkout_query_id=query["id"], ok=True)
+    await bot.call("answerPreCheckoutQuery", pre_checkout_query_id=query["id"], ok=True)
 
 @bot.on_poll()
 async def poll_update(poll):
@@ -81,15 +81,13 @@ async def star_rating(message):
              {"text": "⭐⭐⭐⭐⭐", "callback_data": "rate_5"}]
         ]
     }
-    await bot("sendMessage", chat_id=message["chat"]["id"], text="Please rate:", reply_markup=inline_keyboard)
+    await bot.call("sendMessage", chat_id=message["chat"]["id"], text="Please rate:", reply_markup=inline_keyboard)
 
 @bot.on_callback_query()
 async def rating_response(callback):
     rating = callback["data"].split("_")[1]
-    await bot("answerCallbackQuery", callback_query_id=callback["id"], text=f"Thank you for rating: {rating}⭐")
-    await bot("editMessageText", 
-              chat_id=callback["message"]["chat"]["id"], 
-              message_id=callback["message"]["message_id"], 
-              text=f"Your rating: {rating}⭐")
-
-#bot.run()
+    await bot.call("answerCallbackQuery", callback_query_id=callback["id"], text=f"Thank you for rating: {rating}⭐")
+    await bot.call("editMessageText", 
+                   chat_id=callback["message"]["chat"]["id"], 
+                   message_id=callback["message"]["message_id"], 
+                   text=f"Your rating: {rating}⭐")
