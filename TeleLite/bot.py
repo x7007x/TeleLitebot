@@ -38,6 +38,15 @@ class FilterBase:
     def invert(self):
         return NotFilter(self)
 
+    def __and__(self, other):
+        return AndFilter(self, other)
+
+    def __or__(self, other):
+        return OrFilter(self, other)
+
+    def __invert__(self):
+        return NotFilter(self)
+
 
 class AndFilter(FilterBase):
     def __init__(self, f1, f2):
