@@ -2,8 +2,8 @@ import asyncio
 import json
 import os
 from functools import wraps
+
 from flask import Flask, request
-import urllib3
 
 update_types = [
     'message', 'edited_message', 'channel_post', 'edited_channel_post',
@@ -14,8 +14,6 @@ update_types = [
     'my_chat_member', 'chat_member', 'chat_join_request', 'chat_boost',
     'removed_chat_boost'
 ]
-
-http = urllib3.PoolManager()
 
 def safe_print(obj):
     try:
@@ -30,7 +28,7 @@ class FilterBase:
         return AndFilter(self, other)
     def __or__(self, other):
         return OrFilter(self, other)
-    def invert(self):
+    def __invert__(self):
         return NotFilter(self)
 
 class AndFilter(FilterBase):
@@ -347,12 +345,14 @@ class Bot:
         return self._handler_decorator('removed_chat_boost', filter_)
 
     async def __call__(self, method: str, **params):
-        url = f"{self.api_url}/{method}"
-        headers = {'Content-Type': 'application/json'}
-        response = http.request('POST', url, body=json.dumps(params), headers=headers)
-        data = json.loads(response.data.decode('utf-8'))
-        safe_print(data)
-        return data
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            url = f"{self.api_url}/{method}"
+            headers = {'Content-Type': 'application/json'}
+            async with session.post(url, json=params, headers=headers) as resp:
+                data = await resp.json()
+                safe_print(data)
+                return data
 
     def run(self):
         if self.webhook:
@@ -361,13 +361,12 @@ class Bot:
         else:
             print("Running long polling...")
             from time import sleep
+            import requests
             offset = 0
             while True:
-                response = http.request('POST', f"{self.api_url}/getUpdates", 
-                                      body=json.dumps({"offset": offset, "timeout": 100, "allowed_updates": update_types}),
-                                      headers={'Content-Type': 'application/json'})
+                r = requests.post(f"{self.api_url}/getUpdates", json={"offset": offset, "timeout": 100, "allowed_updates": update_types})
                 try:
-                    updates = json.loads(response.data.decode('utf-8'))
+                    updates = r.json()
                 except Exception:
                     sleep(1)
                     continue
