@@ -12,7 +12,7 @@ async def greet_user(message):
 async def pong_ping(message):
     await bot.call("sendMessage", chat_id=message["chat"]["id"], text="pong!")
 
-@bot.on_message(~filters.text("ignore me"))
+@bot.on_message(filters.text("ignore me").invert())
 async def all_but_ignore(message):
     print("Message:", message.get("text"))
 
