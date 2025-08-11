@@ -2,8 +2,8 @@ import asyncio
 import json
 import os
 from functools import wraps
-
 from flask import Flask, request
+import urllib3
 
 update_types = [
     'message', 'edited_message', 'channel_post', 'edited_channel_post',
@@ -218,6 +218,7 @@ class Bot:
         self.handlers = {ut: [] for ut in update_types}
         self.webhook = webhook
         self.app = Flask(__name__)
+        self.http = urllib3.PoolManager()
 
         @self.app.route('/alive')
         def handle_alive():
@@ -345,14 +346,13 @@ class Bot:
         return self._handler_decorator('removed_chat_boost', filter_)
 
     async def __call__(self, method: str, **params):
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            url = f"{self.api_url}/{method}"
-            headers = {'Content-Type': 'application/json'}
-            async with session.post(url, json=params, headers=headers) as resp:
-                data = await resp.json()
-                safe_print(data)
-                return data
+        url = f"{self.api_url}/{method}"
+        headers = {'Content-Type': 'application/json'}
+        data = json.dumps(params).encode('utf-8')
+        response = self.http.request('POST', url, body=data, headers=headers)
+        result = json.loads(response.data.decode('utf-8'))
+        safe_print(result)
+        return result
 
     def run(self):
         if self.webhook:
@@ -361,12 +361,12 @@ class Bot:
         else:
             print("Running long polling...")
             from time import sleep
-            import requests
             offset = 0
             while True:
-                r = requests.post(f"{self.api_url}/getUpdates", json={"offset": offset, "timeout": 100, "allowed_updates": update_types})
+                data = json.dumps({"offset": offset, "timeout": 100, "allowed_updates": update_types})
+                response = self.http.request('POST', f"{self.api_url}/getUpdates", body=data, headers={'Content-Type': 'application/json'})
                 try:
-                    updates = r.json()
+                    updates = json.loads(response.data.decode('utf-8'))
                 except Exception:
                     sleep(1)
                     continue
