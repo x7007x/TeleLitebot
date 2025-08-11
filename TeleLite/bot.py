@@ -2,8 +2,11 @@ import asyncio
 import json
 import os
 from functools import wraps
-
-from flask import Flask, request
+from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
+from time import sleep
+from flask import Flask, request, Response
+import urllib3
 
 update_types = [
     'message', 'edited_message', 'channel_post', 'edited_channel_post',
@@ -212,28 +215,44 @@ def match_filter(item, filt):
     return False
 
 class Bot:
-    def __init__(self, token, webhook=None):
+    def __init__(self, token, webhook=None, loop=None, max_workers=10):
         self.token = token
         self.api_url = f"https://api.telegram.org/bot{token}"
         self.handlers = {ut: [] for ut in update_types}
         self.webhook = webhook
         self.app = Flask(__name__)
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._http = urllib3.PoolManager()
+        if loop is None:
+            self._loop = asyncio.new_event_loop()
+            self._loop_thread = Thread(target=self._start_loop, daemon=True)
+            self._loop_thread.start()
+        else:
+            self._loop = loop
+            self._loop_thread = None
 
-        @self.app.route('/alive')
+        @self.app.route('/alive', methods=['GET'])
         def handle_alive():
             return 'Alive 🕯️', 200
 
         @self.app.route('/webhook', methods=['POST'])
         def handle_webhook():
-            update = request.get_json()
+            try:
+                update = request.get_json(force=True, silent=True)
+            except Exception:
+                update = None
             if not update:
-                return 'No Data', 400
+                return Response('No Data', status=400)
             update_type = self._extract_update_type(update)
             if update_type and update_type in self.handlers:
                 data = update.get(update_type, {})
                 data = self._fix_reserved_keys(data)
                 self._process_handlers(update_type, data)
             return '🚀', 200
+
+    def _start_loop(self):
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
 
     def _extract_update_type(self, update):
         for ut in update_types:
@@ -245,7 +264,7 @@ class Bot:
         if isinstance(data, dict):
             if 'from' in data:
                 data['from_user'] = data.pop('from')
-            for k,v in data.items():
+            for k,v in list(data.items()):
                 if isinstance(v, dict):
                     data[k] = self._fix_reserved_keys(v)
                 elif isinstance(v, list):
@@ -253,24 +272,37 @@ class Bot:
         return data
 
     def _process_handlers(self, update_type, data):
-        for filt, handler in self.handlers.get(update_type, []):
+        for filt, handler, is_coro in self.handlers.get(update_type, []):
             try:
                 ok = filt(data) if callable(filt) else match_filter(data, filt)
-                if ok:
-                    result = handler(data)
-                    if asyncio.iscoroutine(result):
-                        asyncio.run(result)
+                if not ok:
+                    continue
+                if is_coro:
+                    asyncio.run_coroutine_threadsafe(self._safe_call_async(handler, data), self._loop)
+                else:
+                    self._executor.submit(self._safe_call_sync, handler, data)
             except Exception as e:
-                print(f"Handler error: {e}")
+                safe_print({"handler_error": str(e)})
+
+    async def _safe_call_async(self, handler, data):
+        try:
+            await handler(data)
+        except Exception as e:
+            safe_print({"async_handler_exception": str(e)})
+
+    def _safe_call_sync(self, handler, data):
+        try:
+            handler(data)
+        except Exception as e:
+            safe_print({"sync_handler_exception": str(e)})
 
     def _handler_decorator(self, update_type, filter_):
         def decorator(fn):
-            self.handlers[update_type].append((filter_, fn))
+            is_coro = asyncio.iscoroutinefunction(fn)
+            self.handlers[update_type].append((filter_ or (lambda u: True), fn, is_coro))
             @wraps(fn)
             def wrapper(*args, **kwargs):
                 res = fn(*args, **kwargs)
-                if asyncio.iscoroutine(res):
-                    return asyncio.run(res)
                 return res
             return wrapper
         return decorator
@@ -350,32 +382,39 @@ class Bot:
             url = f"{self.api_url}/{method}"
             headers = {'Content-Type': 'application/json'}
             async with session.post(url, json=params, headers=headers) as resp:
-                data = await resp.json()
+                data = await resp.json(content_type=None)
                 safe_print(data)
                 return data
 
     def run(self):
         if self.webhook:
             print("Running Flask webhook server...")
-            self.app.run(host='0.0.0.0', port=5000)
+            self.app.run(host='0.0.0.0', port=5000, threaded=True)
         else:
             print("Running long polling...")
-            from time import sleep
-            import requests
             offset = 0
             while True:
-                r = requests.post(f"{self.api_url}/getUpdates", json={"offset": offset, "timeout": 100, "allowed_updates": update_types})
                 try:
-                    updates = r.json()
-                except Exception:
-                    sleep(1)
-                    continue
-                if updates.get('ok'):
-                    for upd in updates.get('result', []):
-                        offset = max(offset, upd['update_id'] + 1)
-                        utype = self._extract_update_type(upd)
-                        if not utype:
-                            continue
-                        data = self._fix_reserved_keys(upd.get(utype, {}))
-                        self._process_handlers(utype, data)
-                sleep(0)
+                    body = json.dumps({"offset": offset, "timeout": 100, "allowed_updates": update_types})
+                    url = f"{self.api_url}/getUpdates"
+                    r = self._http.request('POST', url, body=body.encode('utf-8'), headers={'Content-Type': 'application/json'}, timeout=110.0)
+                    if not r or not r.data:
+                        sleep(0.1)
+                        continue
+                    try:
+                        updates = json.loads(r.data.decode('utf-8'))
+                    except Exception:
+                        sleep(0.1)
+                        continue
+                    if updates.get('ok'):
+                        for upd in updates.get('result', []):
+                            offset = max(offset, upd.get('update_id', 0) + 1)
+                            utype = self._extract_update_type(upd)
+                            if not utype:
+                                continue
+                            data = self._fix_reserved_keys(upd.get(utype, {}))
+                            self._process_handlers(utype, data)
+                except Exception as e:
+                    safe_print({"long_poll_error": str(e)})
+                    sleep(0.5)
+                sleep(0.01)
